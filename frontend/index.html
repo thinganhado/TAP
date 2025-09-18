@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FraudOps demo dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-iecdLmaskl7CVKx+x9t/O0s5r2F5n/QvI55t5dF3s7K5C+F4a2z15D5/f0J5I55v5P3Qy5o6Zz8" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    /* Custom styles for transitions and shadows */
+    html, body, #root { height: 100% }
+    .card-transition { transition: all 0.3s ease-in-out; }
+    .card-transition:hover { transform: translateY(-4px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+    .btn-transition { transition: background-color 0.2s ease-in-out, transform 0.1s ease-out; }
+    .btn-transition:hover { transform: translateY(-1px); }
+    .modal-backdrop { animation: fadeIn 0.3s ease-out forwards; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    /* Mirror Glaze Effect */
+    .mirror-glaze-effect {
+      position: relative;
+      overflow: hidden;
+      z-index: 1;
+    }
+    .mirror-glaze-effect::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(
+        to right,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.3) 50%,
+        rgba(255, 255, 255, 0) 100%
+      );
+      transition: transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    }
+    .mirror-glaze-effect:hover::before {
+      transform: translateX(200%);
+    }
+  </style>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-800 text-slate-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const {useEffect, useMemo, useState} = React;
+
+    // helpers
+    const now = () => new Date().toLocaleString();
+    const uid = () => Math.random().toString(36).slice(2,8);
+    const pick = (arr) => arr[Math.floor(Math.random()*arr.length)];
+
+    const USERNAMES = ["alicia","bchan","cnguyen","dpatel","ekim","fgarcia","zzhao","lwang","hsato","klee"];
+    const DEVICES = ["iPhone 15","Pixel 8","Windows 11","MacBook M2","iPad","Samsung S23"];
+    const IPS = ["13.7.2.40","77.21.5.8","201.16.9.99","189.54.31.4","10.2.3.7","54.202.1.12"];
+    const CITIES = ["London","Singapore","Sydney","Toronto","New York","Tokyo"];
+    const CHANNELS = ["web","mobile","api"];
+    const EVENT_TYPES = ["account takeover","velocity breach","impossible travel","card testing","bot spike"];
+    const REASONS = [
+      "ip risk score high",
+      "device not seen",
+      "geo velocity high",
+      "password resets spike",
+      "failed cvv tries",
+      "proxy suspected"
+    ];
+
+    const AlertIcons = {
+      "account takeover": <i className="fa-solid fa-user-slash text-red-500"></i>,
+      "velocity breach": <i className="fa-solid fa-gauge-high text-amber-500"></i>,
+      "impossible travel": <i className="fa-solid fa-plane-departure text-orange-500"></i>,
+      "card testing": <i className="fa-solid fa-credit-card text-rose-500"></i>,
+      "bot spike": <i className="fa-solid fa-robot text-teal-500"></i>,
+    };
+
+    function riskColor(score){
+      if(score>=85) return "bg-red-700 text-white border-red-500";
+      if(score>=65) return "bg-amber-600 text-white border-amber-400";
+      return "bg-slate-700 text-slate-200 border-slate-500";
+    }
+    const RiskBadge = ({score}) => (
+      <span class={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${riskColor(score)}`}>RISK {score}</span>
+    );
+
+    const Kpi = ({title,value,sub}) => (
+      <div class="rounded-2xl border border-slate-700 bg-slate-700 text-white p-6 shadow-md card-transition mirror-glaze-effect">
+        <div class="text-sm tracking-wide text-slate-400 font-bold uppercase">{title}</div>
+        <div class="mt-2 text-3xl font-bold">{value}</div>
+        <div class="text-xs text-slate-400 mt-1 font-bold uppercase">{sub}</div>
+      </div>
+    );
+
+    function App(){
+      const [tab, setTab] = useState("users");
+      const [userFeed, setUserFeed] = useState(()=>Array.from({length:10}, mockUserEvent));
+      const [txnFeed, setTxnFeed] = useState(()=>Array.from({length:10}, mockTxnEvent));
+      const [alerts, setAlerts] = useState(()=>Array.from({length:8}, mockAlert));
+      const [query, setQuery] = useState("");
+      const [openCase, setOpenCase] = useState(null);
+
+      useEffect(()=>{
+        const t1 = setInterval(()=> setUserFeed(f=>[mockUserEvent(),...f].slice(0,50)), 2500);
+        const t2 = setInterval(()=> setTxnFeed(f=>[mockTxnEvent(),...f].slice(0,50)), 3200);
+        const t3 = setInterval(()=> setAlerts(a=>[mockAlert(),...a].slice(0,80)), 7000);
+        return ()=>{clearInterval(t1);clearInterval(t2);clearInterval(t3)};
+      },[]);
+
+      const filteredAlerts = useMemo(()=>{
+        if(!query) return alerts;
+        const q = query.toLowerCase();
+        return alerts.filter(r => [r.userId, r.type, r.reason, r.channel].some(x => String(x).toLowerCase().includes(q)));
+      }, [alerts, query]);
+
+      return (
+        <div class="h-full p-8 space-y-8 bg-slate-800 text-slate-100">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-4">
+              <span class="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-orange-600 text-white font-bold text-lg">
+                <i className="fa-solid fa-spider"></i>
+              </span>
+              <h1 class="text-3xl font-bold tracking-tight uppercase">FRAUD OPS</h1>
+            </div>
+            <div class="flex items-center gap-3">
+              <button class="rounded-xl border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 btn-transition" onClick={()=>{setUserFeed(Array.from({length:10}, mockUserEvent)); setTxnFeed(Array.from({length:10}, mockTxnEvent)); setAlerts(Array.from({length:8}, mockAlert));}}>Reset demo data</button>
+              <button class="rounded-xl bg-orange-600 text-white px-4 py-2 text-sm hover:bg-orange-700 btn-transition" onClick={()=> setAlerts(a=>[mockAlert(),...a])}>Inject alert</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <Kpi title="Live users" value={userFeed.length} sub="rolling feed" />
+            <Kpi title="Live transactions" value={txnFeed.length} sub="rolling feed" />
+            <Kpi title="Alerts today" value={alerts.length} sub="all sources" />
+            <Kpi title="Median risk" value={Math.round(avg(alerts.map(a=>a.score))||0)} sub="computed" />
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
+            {/* left, live feeds */}
+            <div class="rounded-2xl border border-slate-700 bg-slate-700 text-white p-6 shadow-md card-transition xl:col-span-1">
+              <div class="flex items-center gap-4">
+                <button onClick={()=>setTab("users")} class={`text-sm rounded-xl px-4 py-2 border btn-transition ${tab==='users'?'bg-slate-800 text-white border-orange-600':'bg-slate-700 border-slate-600 text-slate-300'}`}>User activity</button>
+                <button onClick={()=>setTab("txns")} class={`text-sm rounded-xl px-4 py-2 border btn-transition ${tab==='txns'?'bg-slate-800 text-white border-orange-600':'bg-slate-700 border-slate-600 text-slate-300'}`}>Transactions</button>
+              </div>
+              <div class="mt-6 h-[400px] overflow-auto">
+                {tab==='users' ?
+                  <UserTable rows={userFeed}/> : <TxnTable rows={txnFeed}/>}
+              </div>
+            </div>
+
+            {/* right, alerts table */}
+            <div class="rounded-2xl border border-slate-700 bg-slate-700 text-white p-6 shadow-md card-transition xl:col-span-2">
+              <div class="flex items-center justify-between">
+                <h3 class="text-xl font-semibold">Alerts and anomaly queue</h3>
+                <input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search user, type, reason..." class="rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm text-slate-100 w-72 focus:outline-none focus:ring-2 focus:ring-orange-500" />
+              </div>
+              <div class="mt-6 h-[500px] overflow-auto">
+                <table class="w-full text-sm">
+                  <thead class="sticky top-0 bg-slate-700">
+                    <tr class="text-left text-slate-400 border-b border-slate-600">
+                      <th class="py-3 pr-2">Type</th>
+                      <th class="py-3 pr-2">Risk</th>
+                      <th class="py-3 pr-2">Reason</th>
+                      <th class="py-3 pr-2">User</th>
+                      <th class="py-3 pr-2">Channel</th>
+                      <th class="py-3 pr-2">When</th>
+                      <th class="py-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredAlerts.map(a => (
+                      <tr key={a.id} class="border-t border-slate-600 hover:bg-slate-600 transition-colors duration-150">
+                        <td class="py-3 pr-2 flex items-center gap-2">{AlertIcons[a.type]} {a.type}</td>
+                        <td class="py-3 pr-2"><RiskBadge score={a.score}/></td>
+                        <td class="py-3 pr-2 max-w-[260px] truncate" title={a.reason}>{a.reason}</td>
+                        <td class="py-3 pr-2">{a.userId}</td>
+                        <td class="py-3 pr-2 uppercase text-xs text-slate-400">{a.channel}</td>
+                        <td class="py-3 pr-2 text-slate-400">{a.time}</td>
+                        <td class="py-3 pl-2 text-right"><button class="rounded-lg bg-orange-600 text-white px-3 py-1.5 text-xs hover:bg-orange-700 btn-transition" onClick={()=> setOpenCase(a)}>Analyse</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div class="mt-4 text-xs text-slate-400">{filteredAlerts.length} alerts</div>
+              </div>
+            </div>
+          </div>
+
+          {/* case view modal */}
+          {openCase && <CaseModal record={openCase} onClose={()=>setOpenCase(null)} />}
+        </div>
+      );
+    }
+
+    const UserTable = ({rows}) => (
+      <table class="w-full text-sm">
+        <thead class="sticky top-0 bg-slate-700">
+          <tr class="text-left text-slate-400">
+            <th class="py-3 pr-2"><i className="fa-solid fa-user-circle"></i> User</th>
+            <th class="py-3 pr-2"><i className="fa-solid fa-bolt"></i> Event</th>
+            <th class="py-3 pr-2"><i className="fa-solid fa-network-wired"></i> Channel</th>
+            <th class="py-3 pr-2"><i className="fa-solid fa-mobile-screen-button"></i> Device</th>
+            <th class="py-3 text-right"><i className="fa-solid fa-clock"></i> When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(e => (
+            <tr key={e.id} class="border-t border-slate-600">
+              <td class="py-3 pr-2 font-medium">{e.userId}</td>
+              <td class="py-3 pr-2 text-slate-300">{e.event}</td>
+              <td class="py-3 pr-2 uppercase text-xs text-slate-400">{e.channel}</td>
+              <td class="py-3 pr-2 truncate max-w-[120px] text-slate-300" title={e.device}>{e.device}</td>
+              <td class="py-3 pl-2 text-right text-slate-400">{e.time}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+    const TxnTable = ({rows}) => (
+      <table class="w-full text-sm">
+        <thead class="sticky top-0 bg-slate-700">
+          <tr class="text-left text-slate-400">
+            <th class="py-3 pr-2"><i className="fa-solid fa-barcode"></i> Txn id</th>
+            <th class="py-3 pr-2"><i className="fa-solid fa-user-circle"></i> User</th>
+            <th class="py-3 pr-2"><i className="fa-solid fa-dollar-sign"></i> Amount</th>
+            <th class="py-3 pr-2"><i className="fa-solid fa-city"></i> City</th>
+            <th class="py-3 text-right"><i className="fa-solid fa-clock"></i> When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(t => (
+            <tr key={t.id} class="border-t border-slate-600">
+              <td class="py-3 pr-2 font-mono text-xs">{t.id}</td>
+              <td class="py-3 pr-2 font-medium">{t.userId}</td>
+              <td class="py-3 pr-2">${t.amount.toLocaleString()}</td>
+              <td class="py-3 pr-2 text-slate-300">{t.city}</td>
+              <td class="py-3 pl-2 text-right text-slate-400">{t.time}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+    function CaseModal({record, onClose}){
+      const [tab, setTab] = useState("overview");
+      const profile = useMemo(()=> mockProfile(record.userId), [record]);
+      const txnHistory = useMemo(()=> mockTxnHistory(record.userId), [record]);
+      const beh = useMemo(()=> mockBehaviorSeries(), [record]);
+      const graph = useMemo(()=> mockGraph(record.userId), [record]);
+      return (
+        <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop">
+          <div class="absolute inset-0 bg-black/50" onClick={onClose}></div>
+          <div class="relative z-10 w-[1100px] max-w-[95vw] rounded-2xl bg-slate-700 text-white shadow-xl border border-slate-600">
+            <div class="flex items-center justify-between p-6 border-b border-slate-600">
+              <div class="flex items-center gap-3">
+                <div class="text-2xl font-semibold">Case {record.id}</div>
+                <RiskBadge score={record.score}/>
+              </div>
+              <button class="rounded-xl border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800 btn-transition" onClick={onClose}>Close</button>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 p-6">
+              {/* left, profile and trend */}
+              <div class="lg:col-span-1 space-y-6">
+                <div class="rounded-xl border border-slate-600 bg-slate-800 p-6 shadow-sm">
+                  <div class="text-lg font-semibold mb-4">User profile snapshot</div>
+                  <div class="flex items-center gap-4 mb-4">
+                    <div class="h-12 w-12 rounded-full bg-slate-700 flex items-center justify-center font-bold text-lg">{initials(profile.name)}</div>
+                    <div>
+                      <div class="font-semibold text-lg">{profile.name}</div>
+                      <div class="text-xs text-slate-400">{profile.id}</div>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-4 text-sm">
+                    <Field label="Account age" value={`${profile.age} days`} />
+                    <Field label="Last login" value={profile.lastLogin} />
+                    <Field label="Devices" value={profile.devices.join(", ")} />
+                    <Field label="Primary ip" value={profile.ip} />
+                  </div>
+                  <div class="mt-6">
+                    <div class="text-xs text-slate-400 mb-2">Risk breakdown</div>
+                    <div class="h-2 w-full rounded-full bg-slate-600">
+                      <div class="h-2 rounded-full bg-red-500" style={{width: record.score+"%"}}></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="rounded-xl border border-slate-600 bg-slate-800 p-6 shadow-sm">
+                  <div class="text-lg font-semibold mb-4">Behavior trend</div>
+                  <MiniBars data={beh} />
+                </div>
+              </div>
+
+              {/* right, tabs and actions */}
+              <div class="lg:col-span-2 space-y-6">
+                <div class="flex items-center gap-3">
+                  {['overview','txns','behavior','graph'].map(key => (
+                    <button key={key} onClick={()=>setTab(key)} class={`text-sm rounded-xl px-4 py-2 border btn-transition ${tab===key?'bg-slate-800 text-white border-orange-600':'bg-slate-700 text-slate-300 border-slate-600'}`}>{key}</button>
+                  ))}
+                </div>
+
+                {tab==='overview' && (
+                  <div class="rounded-xl border border-slate-600 bg-slate-800 p-0 overflow-hidden">
+                    <table class="w-full text-sm">
+                      <tbody>
+                        <Tr field="Signup city" value={profile.city} />
+                        <Tr field="Preferred channel" value={profile.channel.toUpperCase()} />
+                        <Tr field="Average ticket" value={`$${profile.avgTicket.toLocaleString()}`} />
+                        <Tr field="Auth failures last 24h" value={profile.authFails} />
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {tab==='txns' && (
+                  <div class="rounded-xl border border-slate-600 bg-slate-800 p-0 overflow-hidden max-h-[350px] overflow-auto">
+                    <table class="w-full text-sm">
+                      <thead class="sticky top-0 bg-slate-800">
+                        <tr class="text-left text-slate-400 border-b border-slate-600">
+                          <th class="py-3 pr-2">Txn id</th>
+                          <th class="py-3 pr-2">Amount</th>
+                          <th class="py-3 pr-2">Type</th>
+                          <th class="py-3 pr-2">City</th>
+                          <th class="py-3 pr-2">When</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {txnHistory.map(t => (
+                          <tr key={t.id} class="border-t border-slate-700">
+                            <td class="py-3 pr-2 font-mono text-xs">{t.id}</td>
+                            <td class="py-3 pr-2">${t.amount.toLocaleString()}</td>
+                            <td class="py-3 pr-2">{t.kind}</td>
+                            <td class="py-3 pr-2">{t.city}</td>
+                            <td class="py-3 pr-2 text-slate-400">{t.time}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {tab==='behavior' && (
+                  <div class="rounded-xl border border-slate-600 bg-slate-800 p-6">
+                    <MiniBars data={beh} />
+                  </div>
+                )}
+
+                {tab==='graph' && (
+                  <div class="rounded-xl border border-slate-600 bg-slate-800 p-6">
+                    <GraphPanel graph={graph} />
+                    <div class="text-xs text-slate-400 mt-2">Blue user, yellow devices, red linked accounts</div>
+                  </div>
+                )}
+
+                <div class="flex justify-end gap-3">
+                  <button class="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 btn-transition">Put in review</button>
+                  <button class="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 btn-transition">Mark clean</button>
+                  <button class="rounded-lg bg-red-600 text-white px-4 py-2 text-sm hover:bg-red-700 btn-transition">Mark fraud</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const Field = ({label, value}) => (
+      <div>
+        <div class="text-xs text-slate-400">{label}</div>
+        <div class="font-medium truncate" title={value}>{value}</div>
+      </div>
+    );
+    const Tr = ({field, value}) => (
+      <tr class="border-t border-slate-600">
+        <td class="py-3 px-4 w-52 text-slate-400">{field}</td>
+        <td class="py-3 px-4">{value}</td>
+      </tr>
+    );
+    function MiniBars({data, showAxis}){
+      return (
+        <div class="h-40 flex items-end gap-2">
+          {data.map((d,i)=> (
+            <div key={i} class="w-5 rounded-t-sm bg-orange-500" style={{height: (d.score+10)+"%"}} title={`D${i+1}: ${d.score}`}></div>
+          ))}
+        </div>
+      );
+    }
+
+    function GraphPanel({graph}){
+      const W=900, H=240;
+      const cx = (i) => 120 + i*150;
+      const cy = (row) => 60 + row*90;
+      const nodes = [
+        { id: graph.user, label: graph.user, row: 1, col: 2, kind: "user" },
+        ...graph.devices.map((d,i)=>({ id:d, label:d, row:0, col:i+1, kind:"device" })),
+        ...graph.accounts.map((a,i)=>({ id:a, label:a, row:2, col:i+1, kind:"account" })),
+      ];
+      const links = [
+        ...graph.devices.map(d=>({s:d,t:graph.user})),
+        ...graph.accounts.map(a=>({s:graph.user,t:a})),
+      ];
+      const pos = Object.fromEntries(nodes.map(n=>[n.id,{x:cx(n.col),y:cy(n.row)}]));
+      return (
+        <svg viewBox={`0 0 ${W} ${H}`} class="w-full">
+          {links.map((l,i)=>(
+            <line key={i} x1={pos[l.s].x} y1={pos[l.s].y} x2={pos[l.t].x} y2={pos[l.t].y} stroke="#334155" stroke-width="2" />
+          ))}
+          {nodes.map(n=> (
+            <g key={n.id} transform={`translate(${pos[n.id].x},${pos[n.id].y})`}>
+              <circle r="22" fill={n.kind==="user"?"#2563eb": n.kind==="device"?"#eab308":"#dc2626"} />
+              <text text-anchor="middle" y="38" class="text-[10px] fill-slate-300">{n.label}</text>
+            </g>
+          ))}
+        </svg>
+      );
+    }
+
+    // mock data
+    function mockUserEvent(){
+      const u = pick(USERNAMES);
+      return { id: uid(), userId: u, event: pick(["login","logout","password reset","profile update","2fa challenge"]), channel: pick(CHANNELS), device: pick(DEVICES), time: now() };
+    }
+    function mockTxnEvent(){
+      const u = pick(USERNAMES);
+      return { id: uid(), userId: u, amount: Math.floor(20+Math.random()*4000), city: pick(CITIES), time: now() };
+    }
+    function mockAlert(){
+      const u = pick(USERNAMES);
+      const score = Math.floor(40+Math.random()*60);
+      return { id: uid(), type: pick(EVENT_TYPES), score, reason: pick(REASONS), userId: u, channel: pick(CHANNELS), time: now() };
+    }
+    function mockProfile(userId){
+      return { id:userId, name: userId.replace(/\b\w/g,c=>c.toUpperCase()), age: 120+Math.floor(Math.random()*640), lastLogin: now(), devices: Array.from(new Set([pick(DEVICES), pick(DEVICES)])).slice(0,2), ip: pick(IPS), city: pick(CITIES), channel: pick(CHANNELS), avgTicket: Math.floor(60+Math.random()*600), authFails: Math.floor(Math.random()*5) };
+    }
+    function mockTxnHistory(userId){
+      return Array.from({length: 20}, ()=> ({ id: uid(), amount: Math.floor(Math.random()*9000), kind: pick(["payment","transfer","topup","withdrawal"]), city: pick(CITIES), time: now() }));
+    }
+    function mockBehaviorSeries(){
+      return Array.from({length: 14}, (_,i)=> ({ d:`D${i+1}`, score: Math.floor(20+Math.random()*80) }));
+    }
+    function mockGraph(userId){
+      return { user:userId, devices: Array.from(new Set([pick(DEVICES),pick(DEVICES),pick(DEVICES)])).slice(0,3), accounts: Array.from(new Set([uid(),uid(),uid()])).slice(0,3) };
+    }
+    function initials(name="U"){ return name.split(" ").map(s=>s[0]).join("").slice(0,2).toUpperCase(); }
+    function avg(xs){ return xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : 0; }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>
