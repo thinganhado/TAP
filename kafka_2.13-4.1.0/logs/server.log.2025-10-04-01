@@ -1,0 +1,28 @@
+[2025-10-04 01:06:16,490] WARN [SocketServer listenerType=BROKER, nodeId=1] Unexpected error from /198.235.24.35 (channelId=10.0.0.218:9092-198.235.24.35:59762-2-19); closing connection (org.apache.kafka.common.network.Selector)
+org.apache.kafka.common.network.InvalidReceiveException: Invalid receive (size = 1195725856 larger than 104857600)
+	at org.apache.kafka.common.network.NetworkReceive.readFrom(NetworkReceive.java:95) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.KafkaChannel.receive(KafkaChannel.java:462) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.KafkaChannel.read(KafkaChannel.java:412) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.Selector.attemptRead(Selector.java:679) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.Selector.pollSelectionKeys(Selector.java:581) [kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.Selector.poll(Selector.java:486) [kafka-clients-4.1.0.jar:?]
+	at kafka.network.Processor.poll(SocketServer.scala:1010) [kafka_2.13-4.1.0.jar:?]
+	at kafka.network.Processor.run(SocketServer.scala:914) [kafka_2.13-4.1.0.jar:?]
+	at java.base/java.lang.Thread.run(Thread.java:840) [?:?]
+[2025-10-04 01:17:52,733] WARN [SocketServer listenerType=CONTROLLER, nodeId=1] Unexpected error from /147.185.133.150 (channelId=10.0.0.218:9093-147.185.133.150:60340-0-21); closing connection (org.apache.kafka.common.network.Selector)
+org.apache.kafka.common.network.InvalidReceiveException: Invalid receive (size = 1195725856 larger than 104857600)
+	at org.apache.kafka.common.network.NetworkReceive.readFrom(NetworkReceive.java:95) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.KafkaChannel.receive(KafkaChannel.java:462) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.KafkaChannel.read(KafkaChannel.java:412) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.Selector.attemptRead(Selector.java:679) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.Selector.pollSelectionKeys(Selector.java:581) [kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.Selector.poll(Selector.java:486) [kafka-clients-4.1.0.jar:?]
+	at kafka.network.Processor.poll(SocketServer.scala:1010) [kafka_2.13-4.1.0.jar:?]
+	at kafka.network.Processor.run(SocketServer.scala:914) [kafka_2.13-4.1.0.jar:?]
+	at java.base/java.lang.Thread.run(Thread.java:840) [?:?]
+[2025-10-04 01:21:29,332] INFO [GroupCoordinator id=1 topic=__consumer_offsets partition=3] Member rdkafka-965be8a7-67b4-41d2-af95-986dab0dfb9b in group beh-model has failed, removing it from the group. (org.apache.kafka.coordinator.group.GroupMetadataManager)
+[2025-10-04 01:21:29,333] INFO [GroupCoordinator id=1 topic=__consumer_offsets partition=3] Preparing to rebalance group beh-model in state PreparingRebalance with old generation 7 (reason: removing member rdkafka-965be8a7-67b4-41d2-af95-986dab0dfb9b on heartbeat expiration.). (org.apache.kafka.coordinator.group.GroupMetadataManager)
+[2025-10-04 01:21:32,318] INFO [GroupCoordinator id=1 topic=__consumer_offsets partition=3] Stabilized group beh-model generation 8 with 1 members. (org.apache.kafka.coordinator.group.GroupMetadataManager)
+[2025-10-04 01:21:32,319] INFO [GroupCoordinator id=1 topic=__consumer_offsets partition=3] Assignment received from leader rdkafka-264eec8a-0c34-49f4-a266-470770eb3634 for group beh-model for generation 8. The group has 1 members, 0 of which are static. (org.apache.kafka.coordinator.group.GroupMetadataManager)
+[2025-10-04 01:49:56,433] INFO [SnapshotGenerator id=1] Creating new KRaft snapshot file snapshot 00000000000000175975-0000000020 because we have waited at least 60 minute(s). (org.apache.kafka.image.publisher.SnapshotGenerator)
+[2025-10-04 01:49:56,438] INFO [SnapshotEmitter id=1] Successfully wrote snapshot 00000000000000175975-0000000020 (org.apache.kafka.image.publisher.SnapshotEmitter)

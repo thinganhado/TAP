@@ -1,0 +1,18 @@
+[2025-10-03 22:22:09,558] INFO [GroupCoordinator id=1 topic=__consumer_offsets partition=3] Dynamic member with unknown member id joins group beh-model in Stable state. Created a new member id rdkafka-965be8a7-67b4-41d2-af95-986dab0dfb9b and requesting the member to rejoin with this id. (org.apache.kafka.coordinator.group.GroupMetadataManager)
+[2025-10-03 22:22:09,561] INFO [GroupCoordinator id=1 topic=__consumer_offsets partition=3] Pending dynamic member with id rdkafka-965be8a7-67b4-41d2-af95-986dab0dfb9b joins group beh-model in Stable state. Adding to the group now. (org.apache.kafka.coordinator.group.GroupMetadataManager)
+[2025-10-03 22:22:09,561] INFO [GroupCoordinator id=1 topic=__consumer_offsets partition=3] Preparing to rebalance group beh-model in state PreparingRebalance with old generation 6 (reason: Adding new member rdkafka-965be8a7-67b4-41d2-af95-986dab0dfb9b with group instance id null; client reason: not provided). (org.apache.kafka.coordinator.group.GroupMetadataManager)
+[2025-10-03 22:22:12,276] INFO [GroupCoordinator id=1 topic=__consumer_offsets partition=3] Stabilized group beh-model generation 7 with 2 members. (org.apache.kafka.coordinator.group.GroupMetadataManager)
+[2025-10-03 22:22:12,279] INFO [GroupCoordinator id=1 topic=__consumer_offsets partition=3] Assignment received from leader rdkafka-264eec8a-0c34-49f4-a266-470770eb3634 for group beh-model for generation 7. The group has 2 members, 0 of which are static. (org.apache.kafka.coordinator.group.GroupMetadataManager)
+[2025-10-03 22:38:55,575] WARN [SocketServer listenerType=CONTROLLER, nodeId=1] Unexpected error from /162.216.150.30 (channelId=10.0.0.218:9093-162.216.150.30:60182-2-13); closing connection (org.apache.kafka.common.network.Selector)
+org.apache.kafka.common.network.InvalidReceiveException: Invalid receive (size = 1195725856 larger than 104857600)
+	at org.apache.kafka.common.network.NetworkReceive.readFrom(NetworkReceive.java:95) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.KafkaChannel.receive(KafkaChannel.java:462) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.KafkaChannel.read(KafkaChannel.java:412) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.Selector.attemptRead(Selector.java:679) ~[kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.Selector.pollSelectionKeys(Selector.java:581) [kafka-clients-4.1.0.jar:?]
+	at org.apache.kafka.common.network.Selector.poll(Selector.java:486) [kafka-clients-4.1.0.jar:?]
+	at kafka.network.Processor.poll(SocketServer.scala:1010) [kafka_2.13-4.1.0.jar:?]
+	at kafka.network.Processor.run(SocketServer.scala:914) [kafka_2.13-4.1.0.jar:?]
+	at java.base/java.lang.Thread.run(Thread.java:840) [?:?]
+[2025-10-03 22:49:55,974] INFO [SnapshotGenerator id=1] Creating new KRaft snapshot file snapshot 00000000000000154378-0000000020 because we have waited at least 60 minute(s). (org.apache.kafka.image.publisher.SnapshotGenerator)
+[2025-10-03 22:49:55,980] INFO [SnapshotEmitter id=1] Successfully wrote snapshot 00000000000000154378-0000000020 (org.apache.kafka.image.publisher.SnapshotEmitter)

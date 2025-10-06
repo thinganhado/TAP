@@ -50,6 +50,12 @@
     // ---------- utils ----------
     const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
     const fmtTime = iso => { try { return new Date(iso).toLocaleString(); } catch { return iso??""; } };
+    const fmtMoney = val => {
+      if (val === undefined || val === null || val === "") return "";
+      const num = Number(val);
+      if (Number.isNaN(num)) return String(val);
+      return num.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    };
     const uid = () => Math.random().toString(36).slice(2,8);
     const median = arr => {
       if (!arr.length) return 0;
@@ -85,9 +91,25 @@
       };
     }
     function mapFlag(ev){
-      const reason = ev.stream === "transaction"
-        ? `${ev.context?.tx_type ?? ""} • ${ev.context?.amount ?? ""}`
-        : `${ev.context?.latitude ?? ""},${ev.context?.longitude ?? ""} • ${ev.context?.geo_band ?? ""}`;
+      const ctx = ev.context ?? {};
+      let reason;
+      if (ev.stream === "transaction") {
+        const txType = ctx.tx_type ?? ev.tx_type ?? "";
+        const balanceVal = ctx.new_balance ?? ctx.amount;
+        const amountVal = ctx.tx_amount ?? ctx.amount;
+        let detail = "";
+        if (balanceVal !== undefined && balanceVal !== null && balanceVal !== "") {
+          detail = `balance ${fmtMoney(balanceVal)}`;
+        } else if (amountVal !== undefined && amountVal !== null && amountVal !== "") {
+          detail = `amount ${fmtMoney(amountVal)}`;
+        }
+        reason = detail ? `${txType} • ${detail}` : txType;
+      } else {
+        const lat = ctx.latitude ?? "";
+        const lon = ctx.longitude ?? "";
+        const band = ctx.geo_band ?? "";
+        reason = `${lat},${lon} • ${band}`;
+      }
       return {
         id: uid(),
         type: ev.stream ?? "",
@@ -191,7 +213,7 @@
       });
 
       return (
-        <div className="h-full p-6 space-y-6">
+        <div className="max-w-7xl mx-auto p-6">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">

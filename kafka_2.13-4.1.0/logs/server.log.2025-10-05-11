@@ -1,0 +1,7 @@
+[2025-10-05 11:50:01,032] INFO [SnapshotGenerator id=1] Creating new KRaft snapshot file snapshot 00000000000000420741-0000000020 because we have waited at least 60 minute(s). (org.apache.kafka.image.publisher.SnapshotGenerator)
+[2025-10-05 11:50:01,038] INFO [SnapshotEmitter id=1] Successfully wrote snapshot 00000000000000420741-0000000020 (org.apache.kafka.image.publisher.SnapshotEmitter)
+[2025-10-05 11:59:34,634] INFO [LocalLog partition=__cluster_metadata-0, dir=/home/opc/kafka-logs/__cluster_metadata-0] Rolled new log segment at offset 421887 in 2 ms. (org.apache.kafka.storage.internals.log.LocalLog)
+[2025-10-05 11:59:34,635] INFO [ProducerStateManager partition=__cluster_metadata-0] Wrote producer snapshot at offset 421887 with 0 producer ids in 0 ms. (org.apache.kafka.storage.internals.log.ProducerStateManager)
+[2025-10-05 11:59:53,065] INFO [UnifiedLog partition=__cluster_metadata-0, dir=/home/opc/kafka-logs] Incremented log start offset to 26977 due to snapshot generated (org.apache.kafka.storage.internals.log.UnifiedLog)
+[2025-10-05 11:59:53,077] INFO [MetadataLog partition=__cluster_metadata-0, nodeId=1] Marking snapshot OffsetAndEpoch[offset=0, epoch=0] for deletion because its timestamp (1759060736187) is now (1759665593063) older than the
+retention (604800000) (kafka.raft.KafkaMetadataLog)
