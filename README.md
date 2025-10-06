@@ -1,5 +1,5 @@
 
-  # AI Financial Fraud Detection (Community)
+  # AI Financial Fraud Detection
 
   This is a code bundle for AI Financial Fraud Detection (Community). The original project is available at https://www.figma.com/design/CuDv34eKpbsQBuRlTTC2Vl/AI-Financial-Fraud-Detection--Community-.
 
