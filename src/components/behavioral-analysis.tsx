@@ -1,4 +1,11 @@
 import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { io } from "socket.io-client";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -33,80 +40,239 @@ import {
   Eye,
 } from "lucide-react";
 
-const chartData = [
-  { time: "00:00", normal: 205, suspicious: 8, fraudulent: 3 },
-  { time: "04:00", normal: 182, suspicious: 16, fraudulent: 5 },
-  { time: "08:00", normal: 367, suspicious: 5, fraudulent: 17 },
-  { time: "12:00", normal: 127, suspicious: 8, fraudulent: 11 },
-  { time: "16:00", normal: 410, suspicious: 21, fraudulent: 19 },
-  { time: "20:00", normal: 289, suspicious: 9, fraudulent: 16 },
-];
+type ConnectionState = "connecting" | "connected" | "disconnected";
+type RiskStatus = "normal" | "review" | "flagged";
 
-const riskScoreData = [
-  { time: "00:00", score: 4.5 },
-  { time: "02:00", score: 3.8 },
-  { time: "04:00", score: 4.2 },
-  { time: "06:00", score: 5.3 },
-  { time: "08:00", score: 7.1 },
-  { time: "10:00", score: 8.4 },
-  { time: "12:00", score: 9.3 },
-  { time: "14:00", score: 8.2 },
-  { time: "16:00", score: 7.4 },
-  { time: "18:00", score: 6.1 },
-  { time: "20:00", score: 5.5 },
-  { time: "22:00", score: 4.7 },
-];
+interface ScoredBehavior {
+  id: string;
+  linkId: string;
+  clientId: string;
+  eventTime: string;           // Timestamp from dataset (when behavior occurred)
+  scoredTime: string;           // Timestamp when fraud detection was performed
+  latitude: number;
+  longitude: number;
+  riskScore: number;
+  status: RiskStatus;
+  decision: string;
+  threshold: number;
+  specialistProbas: {
+    temporal: number;
+    geographical: number;
+    behavioral: number;
+    composite: number;
+  };
+  aiModel: string;
+}
 
-const recentTransactions = [
-  {
-    id: "TXN-789123",
-    account: "****4521",
-    coordinates: { longitude: -74.0060, latitude: 40.7128 },
-    location: "New York, NY",
-    riskScore: 9.2,
-    status: "flagged",
-    aiModel: "DeepFraud-v3",
-    confidence: 82,
-    timestamp: "2024-09-15 14:23:45",
-  },
-  {
-    id: "TXN-789124",
-    account: "****7891",
-    coordinates: { longitude: -0.1276, latitude: 51.5074 },
-    location: "London, UK",
-    riskScore: 2.1,
-    status: "normal",
-    aiModel: "DeepFraud-v3",
-    confidence: 82,
-    timestamp: "2024-09-15 14:22:12",
-  },
-  {
-    id: "TXN-789125",
-    account: "****3456",
-    coordinates: { longitude: 72.8777, latitude: 19.0760 },
-    location: "Mumbai, IN",
-    riskScore: 7.8,
-    status: "review",
-    aiModel: "GraphNet-v2",
-    confidence: 82,
-    timestamp: "2024-09-15 14:21:33",
-  },
-  {
-    id: "TXN-789126",
-    account: "****9876",
-    coordinates: { longitude: -79.3832, latitude: 43.6532 },
-    location: "Toronto, CA",
-    riskScore: 1.5,
-    status: "normal",
-    aiModel: "DeepFraud-v3",
-    confidence: 99,
-    timestamp: "2024-09-15 14:20:18",
-  },
-];
+interface ChartPoint {
+  time: string;
+  normal: number;
+  suspicious: number;
+  fraudulent: number;
+}
+
+interface RiskPoint {
+  date: string;
+  score: number;
+}
+
+const DEFAULT_BACKEND = "http://localhost:8000";
+
+function resolveBackendOrigin(): string {
+  const envBase = import.meta.env?.VITE_REALTIME_BASE;
+  if (typeof envBase === "string" && envBase.trim().length > 0) {
+    return envBase.replace(/\/$/, "");
+  }
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+  return DEFAULT_BACKEND;
+}
+
+function toNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const numeric = Number(value);
+  return Number.isNaN(numeric) ? null : numeric;
+}
+
+function formatTime(value: string): string {
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return value || "—";
+  return dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDate(value: string): string {
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return value || "—";
+  return dt.toLocaleDateString();
+}
+
+function formatDateTime(value: string): string {
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return value || "—";
+  return dt.toLocaleString();
+}
+
+function epoch(value: string): number {
+  const ts = Date.parse(value);
+  return Number.isNaN(ts) ? 0 : ts;
+}
+
+function computeStatus(risk: number, decision: string, threshold: number): RiskStatus {
+  if (decision === "flagged" || risk >= 0.8) return "flagged";
+  if (decision === "flag" || risk >= threshold) return "review";
+  return "normal";
+}
+
+function mapScoredBehavior(payload: any): ScoredBehavior | null {
+  if (!payload) return null;
+  
+  const ctx = payload.context ?? {};
+  const clientId = payload.client_id ?? ctx.client_id ?? "";
+  const linkId = payload.link_id ?? ctx.link_id ?? "";
+  
+  if (!clientId && !linkId) return null;
+  
+  const eventTime = payload.event_time || new Date().toISOString();
+  const scoredTime = new Date().toISOString(); // Current time when scored
+  
+  const riskScore = toNumber(ctx.prediction_probability ?? payload.risk_score ?? payload.probability) ?? 0;
+  const threshold = toNumber(ctx.threshold ?? payload.threshold) ?? 0.5;
+  const decision = String(payload.decision ?? "").toLowerCase() || (riskScore >= threshold ? "flag" : "ok");
+  
+  const specialistProbas = ctx.specialist_probas ?? {};
+  
+  return {
+    id: `${linkId || clientId}|${eventTime}`,
+    linkId,
+    clientId,
+    eventTime,
+    scoredTime,
+    latitude: toNumber(ctx.latitude ?? payload.latitude) ?? 0,
+    longitude: toNumber(ctx.longitude ?? payload.longitude) ?? 0,
+    riskScore,
+    status: computeStatus(riskScore, decision, threshold),
+    decision,
+    threshold,
+    specialistProbas: {
+      temporal: toNumber(specialistProbas.temporal) ?? 0,
+      geographical: toNumber(specialistProbas.geographical) ?? 0,
+      behavioral: toNumber(specialistProbas.behavioral) ?? 0,
+      composite: toNumber(specialistProbas.composite) ?? 0,
+    },
+    aiModel: payload.model_version ?? ctx.model_version ?? "GeoEnsemble-v1",
+  };
+}
+
+function buildTimeBasedChart(behaviors: ScoredBehavior[]): ChartPoint[] {
+  // Use scoredTime (when detection was performed) for time-based grouping
+  const buckets = new Map<string, { normal: number; suspicious: number; fraudulent: number }>();
+  
+  for (const beh of behaviors) {
+    const timeLabel = formatTime(beh.scoredTime);
+    const slot = buckets.get(timeLabel) ?? { normal: 0, suspicious: 0, fraudulent: 0 };
+    
+    if (beh.status === "flagged") slot.fraudulent += 1;
+    else if (beh.status === "review") slot.suspicious += 1;
+    else slot.normal += 1;
+    
+    buckets.set(timeLabel, slot);
+  }
+  
+  return Array.from(buckets.entries())
+    .map(([time, counts]) => ({ time, ...counts }))
+    .slice(-24);
+}
+
+function buildDateBasedRiskSeries(behaviors: ScoredBehavior[]): RiskPoint[] {
+  // Use eventTime (from dataset) for date-based risk scoring
+  const dateGroups = new Map<string, number[]>();
+  
+  for (const beh of behaviors) {
+    const dateLabel = formatDate(beh.eventTime);
+    const scores = dateGroups.get(dateLabel) ?? [];
+    scores.push(beh.riskScore * 100);
+    dateGroups.set(dateLabel, scores);
+  }
+  
+  return Array.from(dateGroups.entries())
+    .map(([date, scores]) => ({
+      date,
+      score: Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2)),
+    }))
+    .slice(-12);
+}
 
 export function BehavioralAnalysis() {
+  const [behaviors, setBehaviors] = useState<ScoredBehavior[]>([]);
+  const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
+  const backendOrigin = useMemo(() => resolveBackendOrigin(), []);
+
+  useEffect(() => {
+    const hydrateSnapshot = async () => {
+      try {
+        const response = await fetch(`${backendOrigin}/snapshot`, { cache: "no-store" });
+        if (!response.ok) return;
+        
+        const payload = await response.json();
+        const scored = Array.isArray(payload?.behaviours) ? payload.behaviours : [];
+        const mapped = scored
+          .map(mapScoredBehavior)
+          .filter((item): item is ScoredBehavior => Boolean(item));
+        
+        setBehaviors(mapped);
+      } catch (error) {
+        console.warn("Failed to hydrate snapshot", error);
+      }
+    };
+
+    hydrateSnapshot();
+
+    const socket = io(backendOrigin, {
+      path: "/socket.io",
+      transports: ["websocket"],
+      reconnection: true,
+    });
+
+    socket.on("connect", () => setConnectionState("connected"));
+    socket.on("disconnect", () => setConnectionState("disconnected"));
+
+    socket.on("beh_event", (payload) => {
+      const mapped = mapScoredBehavior(payload);
+      if (!mapped) return;
+      
+      setBehaviors((prev) => [mapped, ...prev].slice(0, 200));
+    });
+
+    socket.on("flag_event", (payload) => {
+      if (payload.stream !== "behaviour") return;
+      const mapped = mapScoredBehavior(payload);
+      if (!mapped) return;
+      
+      setBehaviors((prev) => [mapped, ...prev].slice(0, 200));
+    });
+
+    return () => socket.close();
+  }, [backendOrigin]);
+
+  const chartData = useMemo(() => buildTimeBasedChart(behaviors), [behaviors]);
+  const riskScoreData = useMemo(() => buildDateBasedRiskSeries(behaviors), [behaviors]);
+
   return (
     <div className="space-y-6">
+      {connectionState !== "connected" && (
+        <Card className="border-yellow-200 bg-yellow-50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-yellow-900">
+              {connectionState === "connecting"
+                ? "Connecting to behavior stream..."
+                : "Realtime stream unavailable – showing latest snapshot."}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+      )}
+
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>
@@ -115,38 +281,19 @@ export function BehavioralAnalysis() {
               Real-Time Behavior Analysis
             </CardTitle>
             <CardDescription>
-              AI-powered behavior classification over the
-              last 24 hours
+              Classification by detection time (when fraud scoring occurred)
             </CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="time" />
-                <YAxis />
+                <XAxis dataKey="time" label={{ value: "Time (HH:MM)", position: "insideBottom", offset: -5 }} />
+                <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Line
-                  type="monotone"
-                  dataKey="normal"
-                  stroke="#22c55e"
-                  strokeWidth={2}
-                  name="Normal"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="suspicious"
-                  stroke="#f59e0b"
-                  strokeWidth={2}
-                  name="Suspicious"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="fraudulent"
-                  stroke="#ef4444"
-                  strokeWidth={2}
-                  name="Fraudulent"
-                />
+                <Line type="monotone" dataKey="normal" stroke="#22c55e" strokeWidth={2} name="Normal" dot={false} />
+                <Line type="monotone" dataKey="suspicious" stroke="#f59e0b" strokeWidth={2} name="Review" dot={false} />
+                <Line type="monotone" dataKey="fraudulent" stroke="#ef4444" strokeWidth={2} name="Flagged" dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -159,15 +306,15 @@ export function BehavioralAnalysis() {
               Risk Score Trend
             </CardTitle>
             <CardDescription>
-              Average fraud risk score calculated by AI models
+              Average risk by event date (when behavior occurred in dataset)
             </CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
               <AreaChart data={riskScoreData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="time" />
-                <YAxis domain={[0, 10]} />
+                <XAxis dataKey="date" label={{ value: "Date", position: "insideBottom", offset: -5 }} />
+                <YAxis domain={[0, 100]} />
                 <Tooltip />
                 <Area
                   type="monotone"
@@ -187,77 +334,83 @@ export function BehavioralAnalysis() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Eye className="h-5 w-5 text-purple-500" />
-            Recent Transaction Analysis
+            Recent Behavior Analysis
           </CardTitle>
           <CardDescription>
-            Live monitoring of transactions with AI-powered risk
-            assessment
+            Live monitoring with AI-powered risk assessment
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Transaction ID</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Coordinates</TableHead>
-                <TableHead>Location</TableHead>
-                <TableHead>Risk Score</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {recentTransactions.map((txn) => (
-                <TableRow key={txn.id}>
-                  <TableCell className="font-mono">
-                    {txn.id}
-                  </TableCell>
-                  <TableCell>{txn.account}</TableCell>
-                  <TableCell className="font-mono text-xs">
-                    ({txn.coordinates.longitude}, {txn.coordinates.latitude})
-                  </TableCell>
-                  <TableCell>{txn.location}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`font-medium ${
-                          txn.riskScore >= 8
-                            ? "text-red-600"
-                            : txn.riskScore >= 5
-                              ? "text-orange-600"
-                              : "text-green-600"
-                        }`}
-                      >
-                        {txn.riskScore}
-                      </span>
-                      {txn.riskScore >= 8 && (
-                        <AlertCircle className="h-4 w-4 text-red-500" />
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={
-                        txn.status === "flagged"
-                          ? "destructive"
-                          : txn.status === "review"
-                            ? "default"
-                            : "secondary"
-                      }
-                    >
-                      {txn.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Button size="sm" variant="outline">
-                      Investigate
-                    </Button>
-                  </TableCell>
+          <div className="overflow-y-auto pr-2" style={{ maxHeight: "24rem" }}>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Client ID</TableHead>
+                  <TableHead>Coordinates</TableHead>
+                  <TableHead>Event Time</TableHead>
+                  <TableHead>Detection Time</TableHead>
+                  <TableHead>Risk Score</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>AI Model</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {behaviors.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">
+                      Waiting for scored behaviors...
+                    </TableCell>
+                  </TableRow>
+                )}
+                {behaviors.map((beh) => (
+                  <TableRow key={beh.id}>
+                    <TableCell className="font-mono text-xs">{beh.clientId || beh.linkId}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      ({beh.longitude.toFixed(4)}, {beh.latitude.toFixed(4)})
+                    </TableCell>
+                    <TableCell className="text-xs">{formatDateTime(beh.eventTime)}</TableCell>
+                    <TableCell className="text-xs">{formatDateTime(beh.scoredTime)}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`font-medium ${
+                            beh.status === "flagged"
+                              ? "text-red-600"
+                              : beh.status === "review"
+                                ? "text-orange-600"
+                                : "text-green-600"
+                          }`}
+                        >
+                          {Math.round(beh.riskScore * 100)}
+                        </span>
+                        {beh.status === "flagged" && <AlertCircle className="h-4 w-4 text-red-500" />}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          beh.status === "flagged"
+                            ? "destructive"
+                            : beh.status === "review"
+                              ? "default"
+                              : "secondary"
+                        }
+                      >
+                        {beh.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs">{beh.aiModel}</TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="outline">
+                        Investigate
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>
