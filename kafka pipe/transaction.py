@@ -1,7 +1,6 @@
 import json
 import math
 import os
-import random
 import sys
 import threading
 import time
@@ -20,6 +19,11 @@ try:
 except Exception:  # pragma: no cover
     np = None  # type: ignore
     pd = None  # type: ignore
+
+try:
+    from database.dbconnection import get_db  # type: ignore
+except Exception:  # pragma: no cover
+    get_db = None  # type: ignore
 
 HERE = Path(__file__).resolve().parent
 POSSIBLE_ROOTS = [HERE.parent]
@@ -60,9 +64,9 @@ for module_name in (
 
 
 
-MODEL_PATH = Path(os.getenv("TXN_MODEL_PATH", HERE.parent / "fraud_pipeline.pkl")) # default model path
-REFERENCE_CSV = Path(os.getenv("TXN_REFERENCE_CSV", HERE / "tx_linked_with_entity.csv")) # default reference CSV path
-DEFAULT_THRESHOLD = float(os.getenv("TXN_DECISION_THRESHOLD", "0.5")) # default threshold
+MODEL_PATH = Path(os.getenv("TXN_MODEL_PATH", HERE.parent / "fraud_pipeline.pkl"))  # default model path
+DEFAULT_THRESHOLD = float(os.getenv("TXN_DECISION_THRESHOLD", "0.5"))  # default threshold
+DB_TABLE = os.getenv("TXN_DB_TABLE", "tx_test")
 
 
 class ModelState:
@@ -79,6 +83,51 @@ class ModelState:
 
 
 STATE = ModelState()
+
+
+def _db_configured() -> bool:
+    return callable(get_db) and DB_TABLE
+
+
+def _load_reference_from_db() -> Optional[pd.DataFrame]:
+    if not _db_configured() or pd is None:
+        return None
+
+    try:
+        conn = get_db()
+    except Exception as exc:  # pragma: no cover
+        STATE.reference_error = f"database connection failed: {exc}"
+        return None
+
+    query = f"SELECT * FROM {DB_TABLE}"
+    try:
+        df = pd.read_sql(query, conn)
+    except Exception as exc:  # pragma: no cover
+        STATE.reference_error = f"database query failed: {exc}"
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    if "link_id" not in df.columns:
+        STATE.reference_error = "database table missing link_id column"
+        return None
+
+    rename_map = {
+        "tx_nameOrig": "nameOrig",
+    }
+    df = df.rename(columns=rename_map)
+
+    if "newbalanceOrig" in df.columns and "newbalanceOrg" not in df.columns:
+        df["newbalanceOrg"] = df["newbalanceOrig"]
+
+    if "label_isFraud" not in df.columns and "isFraud" in df.columns:
+        df["label_isFraud"] = df["isFraud"]
+
+    df["link_id"] = df["link_id"].astype(str)
+    return df
 
 
 def _load_model_bundle() -> None:
@@ -109,31 +158,17 @@ def _load_reference_frame() -> None:
     if pd is None:
         STATE.reference_error = "pandas not installed"
         return
-    if not REFERENCE_CSV.exists():
-        STATE.reference_error = f"reference CSV missing: {REFERENCE_CSV}"
-        return
 
-    usecols = None
-    if STATE.feature_names:
-        cols = set(STATE.feature_names)
-        cols.add("link_id")
-        usecols = sorted(cols)
-
-    try:
-        df = pd.read_csv(REFERENCE_CSV, usecols=usecols)  # type: ignore[arg-type]
-    except ValueError:
-        df = pd.read_csv(REFERENCE_CSV)
-    except Exception as exc:  # pragma: no cover
-        STATE.reference_error = f"failed reading CSV: {exc}"
-        return
-
-    if "link_id" not in df.columns:
-        STATE.reference_error = "reference CSV missing link_id column"
+    df = _load_reference_from_db()
+    if df is None:
+        if STATE.reference_error is None:
+            STATE.reference_error = "reference database unavailable"
         return
 
     df["link_id"] = df["link_id"].astype(str)
     # Ensure all feature columns exist
     STATE.reference_df = df.set_index("link_id", drop=False)
+    STATE.reference_error = None
 
 
 def initialize_state() -> None:
@@ -300,9 +335,9 @@ def _predict_probability(features: pd.DataFrame) -> float:
     raise RuntimeError("model lacks prediction interface")
 
 # Score a transaction event and return probability and context (newBalanceOrg)
-def score_transaction(ev: dict) -> Tuple[float, dict]:
+def score_transaction(ev: dict) -> Tuple[Optional[float], dict]:
     if not STATE.ready() or pd is None:
-        return round(random.random(), 4), _fallback_context(
+        return None, _fallback_context(
             "model_unavailable" if STATE.model is None else "pandas_missing"
         )
 
@@ -310,11 +345,7 @@ def score_transaction(ev: dict) -> Tuple[float, dict]:
     features_df, used_reference = _reference_row(link_id) if link_id else (None, False)
 
     if features_df is None:
-        features_df = _build_event_row(ev)
-        used_reference = False
-
-    if features_df is None:
-        return round(random.random(), 4), _fallback_context("feature_frame_unavailable")
+        return None, _fallback_context("reference_row_missing")
 
     new_balance_val = _resolve_new_balance(ev, features_df)
     tx_amount_val = _safe_float(ev.get("amount"))
@@ -323,14 +354,14 @@ def score_transaction(ev: dict) -> Tuple[float, dict]:
         X = _prepare_features(features_df)
     except Exception as exc:  # pragma: no cover
         ctx = _fallback_context(f"feature_prep_failed: {exc}")
-        return round(random.random(), 4), ctx
+        return None, ctx
 
     start = time.perf_counter()
     try:
         prob = _predict_probability(X)
     except Exception as exc:  # pragma: no cover
         ctx = _fallback_context(f"prediction_failed: {exc}")
-        return round(random.random(), 4), ctx
+        return None, ctx
     latency_ms = (time.perf_counter() - start) * 1000.0
 
     ctx = {
@@ -380,6 +411,14 @@ def consume_and_score() -> None:
         ev = json.loads(msg.value().decode("utf-8"))
         link_id = ev.get("link_id")
         prob, ctx = score_transaction(ev)
+        if prob is None:
+            app.logger.warning(
+                "[txn-model] skipping link %s: %s",
+                link_id,
+                ctx.get("reason") or ctx.get("model_error") or "no probability",
+            )
+            continue
+
         risk_score = round(prob, 6)
         decision = "flag" if prob >= DEFAULT_THRESHOLD else "ok"
         ctx.setdefault("threshold", DEFAULT_THRESHOLD)
@@ -434,7 +473,7 @@ def health():
         "model_path": str(MODEL_PATH),
         "model_error": STATE.load_error,
         "reference_loaded": STATE.reference_df is not None,
-        "reference_path": str(REFERENCE_CSV),
+        "reference_source": "database" if _db_configured() else None,
         "reference_error": STATE.reference_error,
     }
 
