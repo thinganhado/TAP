@@ -349,15 +349,9 @@ def _predict_probability(features: pd.DataFrame) -> float:
 # Score a transaction event and return probability and context (newBalanceOrg)
 def score_transaction(ev: dict) -> Tuple[Optional[float], dict]:
     if not STATE.ready() or pd is None:
-        amount_val = _safe_float(ev.get("amount")) or 0.0
-        heuristic = min(max(amount_val / 1_000_000.0, 0.0), 1.0)
-        ctx = _fallback_context(
+        return None, _fallback_context(
             "model_unavailable" if STATE.model is None else "pandas_missing"
         )
-        ctx["fallback"] = True
-        ctx["tx_amount"] = amount_val
-        ctx["latency_ms"] = 0.0
-        return heuristic, ctx
 
     link_id = str(ev.get("link_id", "")).strip()
     features_df, used_reference = _reference_row(link_id) if link_id else (None, False)
@@ -455,7 +449,6 @@ def consume_and_score() -> None:
                 prob,
             )
 
-        account_value = ev.get("src_account") or (f"ID{link_id}" if link_id is not None else None)
         out = {
             "kind": "score",
             "stream": "transaction",
@@ -468,9 +461,7 @@ def consume_and_score() -> None:
             "source": "txn-model",
             "context": {
                 "tx_type": ev.get("tx_type"),
-                "amount": ctx.get("tx_amount", ev.get("amount")),
-                "display_amount": display_amount,
-                "account": account_value,
+                "amount": display_amount,
                 **ctx,
             },
         }
